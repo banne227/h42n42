@@ -46,8 +46,24 @@ let setup_mouse () =
        | None -> ());
       Lwt.return ()))
 
+let setup_controls () =
+  let bind id f =
+    match Dom_html.getElementById_coerce id Dom_html.CoerceTo.input with
+    | None -> ()
+    | Some input ->
+      input##.oninput := Dom_html.handler (fun _ ->
+        (match float_of_string_opt (Js.to_string input##.value) with
+         | Some v -> f v
+         | None -> ());
+        Js._true)
+  in
+  bind "spawn" (fun v -> Creet.time_before_spawn := v *. 1000.);
+  bind "contam" (fun v -> Creet.contamination_rate := v /. 100.);
+  bind "death" (fun v -> Creet.time_before_death := v *. 1000.)
+
 let () =
   setup_mouse ();
+  setup_controls ();
   Random.self_init ();
   Creet.render_river ();
   Creet.render_hospital ();

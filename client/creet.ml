@@ -14,29 +14,32 @@ type creet = {
   mutable grabbed : bool;
   mutable growth : int;
   mutable spawn_time : float;
+  mutable sick_time : float;
   elt : Dom_html.divElement Js.t;
 }
 
 let all : creet list ref = ref []
 
-let time_before_spawn = 10000.
-let time_before_death = 10000.
+let number_of_creets () = List.length !all
+let time_before_spawn = ref 10000.
+let contamination_rate = ref 0.02
+let time_before_death = ref 30000.
 let river_height = 20.
 let hospital_height = 50.
 let start_time = (new%js Js.date_now)##getTime |> Js.to_float
 
 let speed_factor () =
   let elapsed =
-    (((new%js Js.date_now)##getTime |> Js.to_float) -. start_time) /. 1050.
+    (((new%js Js.date_now)##getTime |> Js.to_float) -. start_time) /. 1200.
   in
-  1. +. elapsed /. 60.
+  1. +. elapsed /. 80.
 
 let create ~x ~y ~dx ~dy =
   let elt = Dom_html.createDiv Dom_html.document in
   elt##.style##.position := Js.string "absolute";
   elt##.style##.borderRadius := Js.string "50%";
   elt##.style##.background := Js.string "green";
-  let c = { x; y; dx; dy; radius = 10.; state = Healthy; elt; grabbed = false; growth = 0; spawn_time = (new%js Js.date_now)##getTime |> Js.to_float } in
+  let c = { x; y; dx; dy; radius = 10.; state = Healthy; elt; grabbed = false; growth = 0; spawn_time = (new%js Js.date_now)##getTime |> Js.to_float; sick_time = 0. } in
   all := c :: !all;
   c
 
@@ -45,7 +48,14 @@ let render c =
   c.elt##.style##.left := px (c.x -. c.radius);
   c.elt##.style##.top := px (c.y -. c.radius);
   c.elt##.style##.width := px (2. *. c.radius);
-  c.elt##.style##.height := px (2. *. c.radius)
+  c.elt##.style##.height := px (2. *. c.radius);
+  c.elt##.style##.transition := Js.string "box-shadow 220ms ease, transform 220ms ease";
+  c.elt##.style##.border := Js.string "1.5px solid rgba(255, 255, 255, 0.8)";
+  c.elt##.style##.boxShadow :=
+    Js.string "0 2px 7px rgba(24, 38, 46, 0.28), inset 1px 1px 2px rgba(255, 255, 255, 0.45)";
+  c.elt##.style##.transition := Js.string "background 220ms ease, box-shadow 220ms ease, transform 220ms ease";
+  c.elt##.style##.zIndex := Js.string "2";
+  c.elt##.style##.cursor := Js.string (if c.grabbed then "grabbing" else "grab")
 
 let render_river () =
   let river = Dom_html.createDiv Dom_html.document in
@@ -54,7 +64,12 @@ let render_river () =
   river##.style##.top := Js.string "0px";
   river##.style##.width := Js.string "100%";
   river##.style##.height := Js.string (Printf.sprintf "%.1fpx" river_height);
-  river##.style##.background := Js.string "blue";
+  river##.style##.background :=
+    Js.string "linear-gradient(180deg, #4a9ed0 0%, #287db7 48%, #1d679d 100%)";
+  river##.style##.boxShadow := Js.string "0 2px 7px rgba(24, 91, 139, 0.28)";
+  river##.style##.borderBottom := Js.string "1px solid rgba(255, 255, 255, 0.45)";
+  river##.style##.pointerEvents := Js.string "none";
+  river##.style##.zIndex := Js.string "1";
   Dom.appendChild Dom_html.document##.body river
 
 let render_hospital () =
@@ -64,7 +79,12 @@ let render_hospital () =
   hospital##.style##.top := Js.string (Printf.sprintf "%.1fpx" (float_of_int Dom_html.window##.innerHeight -. hospital_height));
   hospital##.style##.width := Js.string "100%";
   hospital##.style##.height := Js.string (Printf.sprintf "%.1fpx" hospital_height);
-  hospital##.style##.background := Js.string "lightgray";
+  hospital##.style##.background :=
+    Js.string "repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.72) 0px, rgba(255, 255, 255, 0.72) 2px, rgba(226, 235, 232, 0.72) 2px, rgba(226, 235, 232, 0.72) 8px)";
+  hospital##.style##.borderTop := Js.string "2px solid rgba(72, 128, 108, 0.55)";
+  hospital##.style##.boxShadow := Js.string "0 -3px 12px rgba(57, 91, 82, 0.13)";
+  hospital##.style##.pointerEvents := Js.string "none";
+  hospital##.style##.zIndex := Js.string "1";
   Dom.appendChild Dom_html.document##.body hospital
 
 let bounce c ~w ~h =
@@ -99,7 +119,8 @@ let get_sick c =
             c.state <- Mean;
             c.elt##.style##.background := Js.string "purple";
             c.radius <- c.radius *. 0.85
-        end
+        end;
+        c.sick_time <- (new%js Js.date_now)##getTime |> Js.to_float
     end
 
 let touch_river c =
@@ -112,7 +133,7 @@ let contaminate c =
          && other.state = Healthy
          && abs_float (c.x -. other.x) < c.radius +. other.radius
          && abs_float (c.y -. other.y) < c.radius +. other.radius
-         && Random.float 1. < 0.02
+         && Random.float 1. < !contamination_rate
       then get_sick other
     ) !all
 
@@ -184,10 +205,19 @@ let check_end_game () =
     end
     else false
 
+let check_death c =
+    let now = (new%js Js.date_now)##getTime |> Js.to_float in
+    if c.state <> Healthy && not c.grabbed then begin
+        if now -. c.sick_time >= !time_before_death then begin
+            all := List.filter (fun other -> other != c) !all;
+            Dom.removeChild Dom_html.document##.body c.elt;
+        end
+    end
+
 let reproduction c =
     let now = (new%js Js.date_now)##getTime |> Js.to_float in
     if c.state = Healthy && not c.grabbed 
-        && now -. c.spawn_time >= time_before_spawn then begin
+        && now -. c.spawn_time >= !time_before_spawn && number_of_creets () < 50 then begin
         let w = float_of_int Dom_html.window##.innerWidth in
         let h = float_of_int Dom_html.window##.innerHeight in
         let x = Random.float w in
@@ -212,6 +242,7 @@ let rec live c =
   if check_end_game () then Lwt.return ()
   else begin
     move c;
+    check_death c;
     (match reproduction c with
      | Some child -> Lwt.async (fun () -> live child)
      | None -> ());
