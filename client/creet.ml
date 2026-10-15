@@ -44,11 +44,20 @@ let create ~x ~y ~dx ~dy =
   c
 
 let render c =
+  let color, highlight =
+    match c.state with
+    | Healthy -> "#35a56f", "#baf3cf"
+    | Sick -> "#d84b4b", "#ffc1b7"
+    | Berserk -> "#e8892f", "#ffe0a3"
+    | Mean -> "#8d58b5", "#e4c5f7"
+  in
   let px f = Js.string (Printf.sprintf "%.1fpx" f) in
   c.elt##.style##.left := px (c.x -. c.radius);
   c.elt##.style##.top := px (c.y -. c.radius);
   c.elt##.style##.width := px (2. *. c.radius);
   c.elt##.style##.height := px (2. *. c.radius);
+  c.elt##.style##.background :=
+    Js.string (Printf.sprintf "radial-gradient(circle at 32%% 28%%, %s 0%%, %s 42%%, %s 100%%)" highlight color color);
   c.elt##.style##.transition := Js.string "box-shadow 220ms ease, transform 220ms ease";
   c.elt##.style##.border := Js.string "1.5px solid rgba(255, 255, 255, 0.8)";
   c.elt##.style##.boxShadow :=
